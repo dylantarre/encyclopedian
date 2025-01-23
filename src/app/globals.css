@@ -1,0 +1,13 @@
+.card {
+  @apply rounded-lg border p-4 transition-transform hover:scale-[1.02];
+  @apply dark:bg-transparent bg-slate-50;
+  /* Add any existing card styles */
+}
+
+.card > div {
+  @apply bg-white dark:bg-transparent;
+}
+
+.card p, .card h4 {
+  @apply bg-white dark:bg-transparent;
+} 
