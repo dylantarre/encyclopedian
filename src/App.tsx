@@ -2,90 +2,15 @@ import React from 'react';
 import { Book, MagnifyingGlass, Sparkle, BookOpen, Sun, Moon, Compass, SpeakerHigh, SpeakerX, MusicNote, Palette, Flask, Globe, Users, Buildings, Code, GameController, Camera } from '@phosphor-icons/react';
 import { ReadItToMe } from './components/ReadItToMe';
 import { LoadingFacts } from './components/LoadingFacts';
-
-const getCategoryIcon = (category: string) => {
-  const normalizedText = category.toLowerCase();
-  
-  if (normalizedText.includes('music') || normalizedText.includes('song') || normalizedText.includes('concert') || normalizedText.includes('band')) {
-    return MusicNote;
-  }
-  if (normalizedText.includes('art') || normalizedText.includes('paint') || normalizedText.includes('draw') || normalizedText.includes('design')) {
-    return Palette;
-  }
-  if (normalizedText.includes('science') || normalizedText.includes('chemistry') || normalizedText.includes('physics') || normalizedText.includes('experiment')) {
-    return Flask;
-  }
-  if (normalizedText.includes('geography') || normalizedText.includes('place') || normalizedText.includes('country') || normalizedText.includes('city')) {
-    return Globe;
-  }
-  if (normalizedText.includes('people') || normalizedText.includes('society') || normalizedText.includes('community') || normalizedText.includes('culture')) {
-    return Users;
-  }
-  if (normalizedText.includes('history') || normalizedText.includes('politics') || normalizedText.includes('war') || normalizedText.includes('empire')) {
-    return Buildings;
-  }
-  if (normalizedText.includes('technology') || normalizedText.includes('computer') || normalizedText.includes('software') || normalizedText.includes('digital')) {
-    return Code;
-  }
-  if (normalizedText.includes('game') || normalizedText.includes('sport') || normalizedText.includes('play') || normalizedText.includes('athlete')) {
-    return GameController;
-  }
-  if (normalizedText.includes('film') || normalizedText.includes('movie') || normalizedText.includes('cinema') || normalizedText.includes('camera')) {
-    return Camera;
-  }
-  
-  return BookOpen;
-};
 import { useState, useEffect, useRef } from 'react';
 import { useTheme } from './ThemeContext';
+import { getFacePosition } from './utils/imageUtils';
+import { getCategoryIcon } from './utils/categoryIcons';
+import type { ArticleData } from './types';
 
 // Face detection support check
 const isFaceDetectionSupported = async () => {
   return 'FaceDetector' in window;
-};
-
-// Function to get face position
-const getFacePosition = async (imageUrl: string): Promise<string> => {
-  try {
-    if (!await isFaceDetectionSupported()) {
-      return 'center 25%';
-    }
-
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    await new Promise((resolve, reject) => {
-      img.onload = resolve;
-      img.onerror = reject;
-      img.src = imageUrl;
-    });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Could not get canvas context');
-    ctx.drawImage(img, 0, 0);
-
-    const faceDetector = new FaceDetector();
-    const faces = await faceDetector.detect(img);
-
-    if (faces.length > 0) {
-      // Get the average position of all faces
-      const avgX = faces.reduce((sum, face) => sum + face.boundingBox.x + face.boundingBox.width / 2, 0) / faces.length;
-      const avgY = faces.reduce((sum, face) => sum + face.boundingBox.y + face.boundingBox.height / 2, 0) / faces.length;
-
-      // Convert to percentages
-      const xPercent = (avgX / img.width) * 100;
-      const yPercent = (avgY / img.height) * 100;
-
-      return `${xPercent}% ${yPercent}%`;
-    }
-
-    return 'center 25%';
-  } catch (error) {
-    console.warn('Face detection failed:', error);
-    return 'center 25%';
-  }
 };
 
 type ImagePosition = {
@@ -93,29 +18,13 @@ type ImagePosition = {
   position: string;
 };
 
-type ArticleData = {
-  title: string;
-  definition: string;
-  image: {
-    url: string;
-    caption: string;
-    position?: string;
-  } | null;
-  example: string;
-  category: string;
-  relatedArticles: {
-    title: string;
-    extract: string;
-    image: {
-      url: string;
-      caption: string;
-      position?: string;
-    } | null;
-  }[];
-};
-
 // Cache for image positions
 const imagePositionCache = new Map<string, string>();
+
+// Constants
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000; // 1 second
+const SEARCH_DEBOUNCE = 500; // 500ms
 
 function App() {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -126,8 +35,6 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [showContent, setShowContent] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout>();
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY = 1000; // 1 second
   const searchTimeoutRef = useRef<NodeJS.Timeout>();
   const isInitialMount = useRef(true);
 
@@ -171,7 +78,7 @@ function App() {
         console.error('Search error:', err);
         setError('Failed to search for articles. Please try again.');
       }
-    }, 500); // Wait 500ms after user stops typing
+    }, SEARCH_DEBOUNCE); // Wait 500ms after user stops typing
   };
 
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -634,7 +541,7 @@ function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-900 dark:to-gray-800 font-sans transition-colors duration-200">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-900 dark:to-gray-800 font-sans transition-colors duration-200">
       <header className="bg-white dark:bg-gray-800 shadow-sm transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
@@ -678,7 +585,7 @@ function App() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="text-center mb-12">
           <h2 className="text-5xl font-playfair font-bold text-gray-900 dark:text-white mb-6">
             Explore stories from history
@@ -693,7 +600,7 @@ function App() {
           onClick={() => setIsExpanded(!isExpanded)}
         >
           {isLoading ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-800 rounded-2xl">
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/95 dark:bg-gray-800/95 rounded-2xl">
               <LoadingFacts />
             </div>
           ) : error ? (
@@ -889,6 +796,21 @@ function App() {
           </>
         )}
       </main>
+
+      <footer className="mt-auto py-6 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border-t border-gray-200 dark:border-gray-700/50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-center items-center">
+            <a 
+              href="https://lg.media" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-gray-500 dark:text-gray-400 hover:text-amber-500 dark:hover:text-amber-400 transition-colors text-sm font-medium"
+            >
+              Made for goats <span className="text-amber-500 mx-1">🐐</span> by LG Media
+            </a>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
