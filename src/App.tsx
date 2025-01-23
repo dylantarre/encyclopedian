@@ -1,12 +1,20 @@
 import React from 'react';
-import { Book, MagnifyingGlass, Sparkle, BookOpen, Sun, Moon, Compass, SpeakerHigh, SpeakerX, MusicNote, Palette, Flask, Globe, Users, Buildings, Code, GameController, Camera } from '@phosphor-icons/react';
+import { 
+  Book, 
+  MagnifyingGlass, 
+  Sparkle, 
+  BookOpen, 
+  Sun, 
+  Moon, 
+  Compass 
+} from '@phosphor-icons/react';
 import { ReadItToMe } from './components/ReadItToMe';
 import { LoadingFacts } from './components/LoadingFacts';
 import { useState, useEffect, useRef } from 'react';
 import { useTheme } from './ThemeContext';
 import { getFacePosition } from './utils/imageUtils';
 import { getCategoryIcon } from './utils/categoryIcons';
-import type { ArticleData } from './types';
+import type { ArticleData, RelatedArticle } from './types';
 
 // Face detection support check
 const isFaceDetectionSupported = async () => {
@@ -26,7 +34,27 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // 1 second
 const SEARCH_DEBOUNCE = 500; // 500ms
 
-function App() {
+// Add proper return type
+const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+// Add proper type for page parameter
+const isValidArticle = (page: Record<string, any>): boolean => {
+  if (!page || page.missing || !page.extract) return false;
+  
+  const extract = page.extract.trim();
+  if (extract.length < 100) return false;
+  
+  if (page.title.includes('(disambiguation)') || 
+      extract.toLowerCase().includes('may refer to:') ||
+      extract.toLowerCase().includes('disambiguation page')) return false;
+  
+  if (page.title.startsWith('List of') || 
+      page.title.startsWith('Index of')) return false;
+      
+  return true;
+};
+
+function App(): JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const { isDark, toggleTheme } = useTheme();
@@ -81,8 +109,6 @@ function App() {
     }, SEARCH_DEBOUNCE); // Wait 500ms after user stops typing
   };
 
-  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
   const fetchArticleData = async (title: string) => {
     stopSpeech(); // Stop any ongoing speech
     setIsLoading(true);
@@ -90,25 +116,6 @@ function App() {
     setError(null);
     let retries = 0;
     
-    const isValidArticle = (page: any) => {
-      if (!page || page.missing || !page.extract) return false;
-      
-      // Ensure article has meaningful content
-      const extract = page.extract.trim();
-      if (extract.length < 100) return false;
-      
-      // Skip redirects and disambiguation pages
-      if (page.title.includes('(disambiguation)') || 
-          extract.toLowerCase().includes('may refer to:') ||
-          extract.toLowerCase().includes('disambiguation page')) return false;
-      
-      // Skip lists and indexes
-      if (page.title.startsWith('List of') || 
-          page.title.startsWith('Index of')) return false;
-          
-      return true;
-    };
-
     while (retries < MAX_RETRIES) {
     try {
       // Get main article content
