@@ -834,12 +834,22 @@ function App() {
               ))}
             </div>
 
-            {/* Article Type Key and New Article button - centered below */}
-            <div className="mt-16 flex flex-col items-center space-y-8">
-              {/* Article Type Key */}
-              <div className={`inline-block bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl p-4 shadow-lg transition-all duration-500 ${
-                showContent ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
-              }`}>
+            {/* New Article button - closer to cards */}
+            <div className="mt-8 text-center">
+              <button
+                onClick={fetchRandomArticle}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium transition-colors"
+              >
+                <Compass className="h-5 w-5" weight="fill" />
+                <span>New Article</span>
+              </button>
+            </div>
+
+            {/* Article Type Key - with more spacing */}
+            <div className={`mt-16 flex justify-center transition-all duration-500 ${
+              showContent ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
+            }`}>
+              <div className="inline-block bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl p-4 shadow-lg">
                 <div className="grid gap-3">
                   <div className="flex items-center space-x-3">
                     <span className="px-2 py-0.5 text-xs font-medium bg-emerald-500 text-white rounded-full shadow-sm whitespace-nowrap">
@@ -875,15 +885,6 @@ function App() {
                   </div>
                 </div>
               </div>
-
-              {/* New Article button */}
-              <button
-                onClick={fetchRandomArticle}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium transition-colors"
-              >
-                <Compass className="h-5 w-5" weight="fill" />
-                <span>New Article</span>
-              </button>
             </div>
           </>
         )}
