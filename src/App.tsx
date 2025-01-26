@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef, MouseEvent } from 'react';
 import { 
   Book, 
   MagnifyingGlass, 
@@ -6,15 +6,23 @@ import {
   BookOpen, 
   Sun, 
   Moon, 
-  Compass 
+  Compass, 
+  Copy 
 } from '@phosphor-icons/react';
 import { ReadItToMe } from './components/ReadItToMe';
 import { LoadingFacts } from './components/LoadingFacts';
-import { useState, useEffect, useRef } from 'react';
 import { useTheme } from './ThemeContext';
 import { getFacePosition } from './utils/imageUtils';
 import { getCategoryIcon } from './utils/categoryIcons';
-import type { ArticleData, RelatedArticle } from './types';
+import { setFavicon } from './utils/favicon';
+import type { 
+  WikiSearchResponse, 
+  WikiContentResponse, 
+  WikiImageResponse, 
+  WikiRandomResponse 
+} from './types/api';
+import type { ArticleData } from './types';
+import { useNavigate, useParams } from 'react-router-dom';
 
 // Face detection support check
 const isFaceDetectionSupported = async () => {
@@ -62,15 +70,18 @@ function App(): JSX.Element {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showContent, setShowContent] = useState(false);
-  const timeoutRef = useRef<NodeJS.Timeout>();
   const searchTimeoutRef = useRef<NodeJS.Timeout>();
   const isInitialMount = useRef(true);
+  const [isImageExpanded, setIsImageExpanded] = useState<boolean>(false);
+  const [showCopied, setShowCopied] = useState(false);
+  const navigate = useNavigate();
+  const { articleTitle } = useParams();
 
   const stopSpeech = () => {
     window.speechSynthesis.cancel();
   };
 
-  const handleSearch = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearch = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const query = e.target.value;
     setSearchQuery(query);
     stopSpeech(); // Stop speech when searching
@@ -94,31 +105,110 @@ function App(): JSX.Element {
           throw new Error('Failed to search Wikipedia');
         }
         
-        const data = await response.json();
+        const data: WikiSearchResponse = await response.json();
         const searchResults = data.query.search;
         
         if (searchResults.length > 0) {
-          // Get the most relevant result
-          const bestMatch = searchResults[0];
-          fetchArticleData(bestMatch.title);
+          await fetchArticleData(searchResults[0].title);
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.error('Search error:', err);
         setError('Failed to search for articles. Please try again.');
       }
-    }, SEARCH_DEBOUNCE); // Wait 500ms after user stops typing
+    }, SEARCH_DEBOUNCE);
   };
 
-  const fetchArticleData = async (title: string) => {
-    stopSpeech(); // Stop any ongoing speech
-    setIsLoading(true);
-    setShowContent(false);
-    setError(null);
-    let retries = 0;
+  const fetchArticleImage = async (title: string) => {
+    // Fetch image for main article
+    const imageResponse = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages|imageinfo&piprop=original|thumbnail&pithumbsize=1000&iiprop=user|extmetadata&titles=${encodeURIComponent(title)}&origin=*`
+    );
+
+    if (!imageResponse.ok) {
+      return null;
+    }
+
+    const imageData = await imageResponse.json();
+    const imagePages = imageData.query.pages;
+    const imagePage = imagePages[Object.keys(imagePages)[0]];
+    let mainImagePosition = 'center 25%';
+    let imageCredit = '';
+
+    if (imagePage.imageinfo?.[0]) {
+      const info = imagePage.imageinfo[0];
+      imageCredit = info.extmetadata?.Artist?.value || info.user || '';
+    }
+
+    if (imagePage.original || imagePage.thumbnail) {
+      const imageUrl = imagePage.original?.source || imagePage.thumbnail?.source;
+      const cachedPosition = imagePositionCache.get(imageUrl);
+      if (cachedPosition) {
+        mainImagePosition = cachedPosition;
+      } else {
+        mainImagePosition = await getFacePosition(imageUrl);
+        imagePositionCache.set(imageUrl, mainImagePosition);
+      }
+
+      return {
+        url: imageUrl,
+        caption: imagePage.imageinfo?.[0]?.extmetadata?.ImageDescription?.value || '',
+        credit: imageCredit,
+        position: mainImagePosition
+      };
+    }
+
+    return null;
+  };
+
+  const fetchRelatedArticles = async (links: Array<{ title: string }>) => {
+    const relatedArticles = [];
     
-    while (retries < MAX_RETRIES) {
+    for (const link of links) {
+      if (relatedArticles.length >= 9) break;
+      
+      try {
+        const response = await fetch(
+          `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts|pageimages&exintro=1&explaintext=1&piprop=original|thumbnail&pithumbsize=400&titles=${encodeURIComponent(link.title)}&origin=*`
+        );
+
+        if (!response.ok) continue;
+
+        const data = await response.json();
+        const pages = data.query.pages;
+        const page = pages[Object.keys(pages)[0]];
+
+        if (page.missing || !page.extract) continue;
+
+        const imageUrl = page.original?.source || page.thumbnail?.source;
+        
+        relatedArticles.push({
+          title: page.title,
+          extract: page.extract,
+          image: imageUrl ? {
+            url: imageUrl,
+            caption: '',
+            position: 'center'
+          } : null
+        });
+      } catch (err) {
+        console.warn(`Failed to fetch related article ${link.title}:`, err);
+        continue;
+      }
+    }
+
+    return relatedArticles;
+  };
+
+  const fetchArticleData = async (title: string): Promise<void> => {
     try {
-      // Get main article content
+      // 1. Clear everything and show loading
+      stopSpeech();
+      setCurrentArticle(null);  // Clear current article
+      setIsLoading(true);
+      setError(null);
+      setShowContent(false);
+      
+      // 2. Fetch main article data
       const contentResponse = await fetch(
         `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts|categories|links&explaintext=1&exsectionformat=plain&exlimit=1&titles=${encodeURIComponent(title)}&pllimit=50&origin=*`
       );
@@ -127,374 +217,56 @@ function App(): JSX.Element {
         throw new Error('Failed to fetch from Wikipedia API');
       }
       
-      const contentData = await contentResponse.json();
+      const contentData: WikiContentResponse = await contentResponse.json();
       const pages = contentData.query.pages;
       const page = pages[Object.keys(pages)[0]];
-
-      // Additional validation for content length
-      if (!page.extract || page.extract.length < 100) {
-        throw new Error('Article content too short or missing');
-      }
-
-      // Fetch image for main article
-      const imageResponse = await fetch(
-        `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages&piprop=original|name&titles=${encodeURIComponent(title)}&origin=*`
-      );
       
-      if (!imageResponse.ok) {
-        throw new Error('Failed to fetch image');
-      }
-      
-      const imageData = await imageResponse.json();
-      const imagePages = imageData.query.pages;
-      const imagePage = imagePages[Object.keys(imagePages)[0]];
-      let mainImagePosition = 'center 25%';
-      
-      if (imagePage.original) {
-        const cachedPosition = imagePositionCache.get(imagePage.original.source);
-        if (cachedPosition) {
-          mainImagePosition = cachedPosition;
-        } else {
-          mainImagePosition = await getFacePosition(imagePage.original.source);
-          imagePositionCache.set(imagePage.original.source, mainImagePosition);
-        }
-      }
-      
-      const mainImage = imagePage.original ? {
-        url: imagePage.original.source,
-        caption: imagePage.pageimage || '',
-        position: mainImagePosition
-      } : null;
-
-      // Additional validation for content length
-      if (!page.extract || page.extract.length < 100) {
-        throw new Error('Article content too short or missing');
-      }
-
-      if (!isValidArticle(page)) {
-        retries++;
-        if (retries === MAX_RETRIES) {
-          throw new Error('No valid Wikipedia article found after multiple attempts');
-        }
-        await delay(RETRY_DELAY);
-        continue;
+      if (page.missing) {
+        throw new Error('Article not found');
       }
 
       const extract = page.extract;
-      
-      // Function to get the base topic from a title
-      const getBaseTopic = (title: string) => {
-        // Remove years and numbers
-        return title.replace(/\d+/g, '')
-          // Remove common prefixes
-          .replace(/^(The|A|An) /i, '')
-          // Remove everything after "in" or similar words if they exist
-          .split(/ in | of | at | during /i)[0]
-          .trim();
-      };
+      const categories = page.categories?.map(c => c.title) || [];
+      const relevantCategory = categories.find(c => !c.includes(':')) || 'General';
 
-      // Function to calculate similarity between two titles
-      const calculateSimilarity = (title1: string, title2: string) => {
-        const base1 = getBaseTopic(title1);
-        const base2 = getBaseTopic(title2);
-        const words1 = base1.toLowerCase().split(/\W+/);
-        const words2 = base2.toLowerCase().split(/\W+/);
-        const commonWords = words1.filter(word => words2.includes(word));
-        return commonWords.length / Math.max(words1.length, words2.length);
-      };
+      // 3. Fetch image and related articles in parallel
+      const [mainImage, relatedArticles] = await Promise.all([
+        fetchArticleImage(title),
+        fetchRelatedArticles(page.links || [])
+      ]);
 
-      // Get categories and find the most relevant one
-      const categories = page.categories || [];
-      let relevantCategory = 'General Knowledge';
-      
-      // Priority list for category selection
-      const categoryPriorities = [
-        // Look for subject areas first
-        (title: string) => /^(History|Science|Technology|Arts|Music|Literature|Philosophy|Religion|Sports|Politics|Geography)/.test(title),
-        // Then look for specific types
-        (title: string) => /(people|places|events|concepts|books|films|albums)$/i.test(title),
-        // Then look for any category that doesn't contain maintenance terms
-        (title: string) => {
-          const lowercase = title.toLowerCase();
-          return !lowercase.includes('articles') &&
-            !lowercase.includes('pages') &&
-            !lowercase.includes('cs1') &&
-            !lowercase.includes('use') &&
-            !lowercase.includes('wikipedia') &&
-            !lowercase.includes('webarchive') &&
-            !lowercase.includes('with') &&
-            !lowercase.includes('containing') &&
-            !lowercase.includes('stub') &&
-            !lowercase.includes('disambiguation');
-        }
-      ];
-      
-      // Try each priority level until we find a matching category
-      for (const priorityCheck of categoryPriorities) {
-        const match = categories.find((cat: { title: string }) => {
-          const title = cat.title.replace('Category:', '');
-          return priorityCheck(title);
-        });
-        
-        if (match) {
-          relevantCategory = match.title.replace('Category:', '');
-          break;
-        }
-      }
-      
-      // Get related articles from page links
-      const links = page.links || [];
-      
-      // Get main topic categories
-      const mainTopics = categories
-        .map((cat: { title: string }) => cat.title.replace('Category:', ''))
-        .filter((cat: string) => 
-          !cat.match(/articles|pages|cs1|use|wikipedia|webarchive|stub|disambiguation/i) &&
-          !cat.includes('with') &&
-          !cat.includes('containing')
-        );
-
-      // Group links by their relation to the main topic
-      const groupedLinks = links.reduce((acc: { [key: string]: string[] }, link: { title: string }) => {
-        const title = link.title;
-        
-        // Skip unwanted pages
-        if (title.match(/^(Wikipedia:|Template:|Category:|Portal:|Draft:|File:|Help:|Module:|Special:)/i) ||
-            title.includes('disambiguation') ||
-            title.includes('Redirect')) {
-          return acc;
-        }
-
-        // Determine the type of relation
-        if (title.includes(getBaseTopic(page.title))) {
-          acc.direct = [...(acc.direct || []), title];
-        } else if (mainTopics.some(topic => title.includes(topic))) {
-          acc.related = [...(acc.related || []), title];
-        } else {
-          acc.broader = [...(acc.broader || []), title];
-        }
-        
-        return acc;
-      }, { direct: [], related: [], broader: [] });
-
-      // Filter and sort links for diversity
-      const selectDiverseLinks = () => {
-        const selected: string[] = [];
-        const requiredTypes = {
-          direct: false,
-          related: false,
-          broader: false,
-          serendipity: false
-        };
-        
-        // First, ensure we have at least one of each type
-        if (groupedLinks.direct?.length) {
-          const direct = groupedLinks.direct
-            .sort(() => Math.random() - 0.5)[0];
-          if (direct) {
-            selected.push(direct);
-            requiredTypes.direct = true;
-          }
-        }
-        
-        if (groupedLinks.related?.length) {
-          const related = groupedLinks.related
-            .filter(title => !selected.some(s => calculateSimilarity(s, title) > 0.4))
-            .sort(() => Math.random() - 0.5)[0];
-          if (related) {
-            selected.push(related);
-            requiredTypes.related = true;
-          }
-        }
-        
-        if (groupedLinks.broader?.length) {
-          const broader = groupedLinks.broader
-            .filter(title => !selected.some(s => calculateSimilarity(s, title) > 0.4))
-            .sort(() => Math.random() - 0.5)[0];
-          if (broader) {
-            selected.push(broader);
-            requiredTypes.broader = true;
-          }
-        }
-        
-        // Then fill remaining slots with a preference for maintaining type distribution
-        const fillRemainingSlots = () => {
-          const remainingSlots = 9 - selected.length;
-          if (remainingSlots <= 0) return;
-
-          // Distribute remaining slots among available types
-          const availableTypes = [
-            { type: 'direct', links: groupedLinks.direct },
-            { type: 'related', links: groupedLinks.related },
-            { type: 'broader', links: groupedLinks.broader }
-          ].filter(({ links }) => links?.length > 0);
-
-          for (let i = 0; i < remainingSlots && availableTypes.length > 0; i++) {
-            const typeIndex = i % availableTypes.length;
-            const { type, links } = availableTypes[typeIndex];
-            
-            const candidate = links
-              .filter(title => !selected.includes(title))
-              .find(title => !selected.some(s => calculateSimilarity(s, title) > 0.4));
-
-            if (candidate) {
-              selected.push(candidate);
-            }
-          }
-        };
-
-        fillRemainingSlots();
-        
-        return selected.slice(0, 9);
-      };
-
-      const diverseLinks = selectDiverseLinks();
-      const selected = diverseLinks; // Store selected links for reference
-
-      // Fetch extracts for related articles
-      const relatedResponse = await fetch(
-        `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts|pageimages&exintro=1&explaintext=1&piprop=original|name&titles=${diverseLinks.join('|')}&origin=*`
-      );
-      
-      if (!relatedResponse.ok) {
-        throw new Error('Failed to fetch related articles');
-      }
-      
-      const relatedData = await relatedResponse.json();
-      const relatedPages = relatedData.query.pages;
-      
-      // Process images in parallel
-      const imagePositionPromises = Object.values(relatedPages)
-        .filter((page: any) => page.original)
-        .map(async (page: any) => {
-          const cachedPosition = imagePositionCache.get(page.original.source);
-          if (cachedPosition) {
-            return { url: page.original.source, position: cachedPosition };
-          }
-          const position = await getFacePosition(page.original.source);
-          imagePositionCache.set(page.original.source, position);
-          return { url: page.original.source, position };
-        });
-
-      const imagePositions = await Promise.all(imagePositionPromises);
-      const positionMap = new Map(imagePositions.map(({ url, position }) => [url, position]));
-      
-      const relatedArticles = Object.values(relatedPages)
-        .filter((page: any) => page.extract && page.extract.length > 50 && !page.missing)
-        .map((page: any) => ({
-          title: page.title,
-          extract: page.extract.split(/[.!?](?:\s|$)/)[0] + '.',
-          image: page.original ? {
-            url: page.original.source,
-            caption: page.pageimage || '',
-            position: positionMap.get(page.original.source) || 'center 25%'
-          } : null,
-          type: diverseLinks.indexOf(page.title) < 3 ? 'direct' :
-                diverseLinks.indexOf(page.title) < 6 ? 'related' : 'broader'
-        }))
-        .filter(article => 
-          article.extract && 
-          article.extract !== '.' && 
-          article.extract.length > 20
-        )
-        // Sort articles by type to ensure consistent order
-        .sort((a, b) => {
-          const typeOrder = { direct: 0, related: 1, broader: 2 };
-          return typeOrder[a.type as keyof typeof typeOrder] - typeOrder[b.type as keyof typeof typeOrder];
-        });
-
-      // If we don't have enough articles, fetch random ones to fill the gaps
-      if (relatedArticles.length < 9) {
-        const randomResponse = await fetch(
-          'https://en.wikipedia.org/w/api.php?action=query&format=json&list=random&rnnamespace=0&rnlimit=20&origin=*&rnminsize=1000'
-        );
-        
-        if (!randomResponse.ok) {
-          throw new Error('Failed to fetch additional articles');
-        }
-        
-        const randomData = await randomResponse.json();
-        const randomTitles = randomData.query.random.map((page: any) => page.title);
-        
-        // Fetch extracts for random articles
-        const randomExtractsResponse = await fetch(
-          `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=1&explaintext=1&titles=${randomTitles.join('|')}&origin=*`
-        );
-        
-        if (!randomExtractsResponse.ok) {
-          throw new Error('Failed to fetch random article extracts');
-        }
-        
-        const randomExtractsData = await randomExtractsResponse.json();
-        const randomPages = randomExtractsData.query.pages;
-        
-        const serendipityArticles = Object.values(randomPages)
-          .filter((page: any) => page.extract && page.extract.length > 50 && !page.missing)
-          .map((page: any) => ({
-            title: page.title,
-            extract: page.extract.split(/[.!?](?:\s|$)/)[0] + '.',
-            type: 'serendipity'
-          }))
-          .filter(article => 
-            article.extract && 
-            article.extract !== '.' && 
-            article.extract.length > 20 &&
-            !relatedArticles.some(existing => existing.title === article.title)
-          );
-        
-        // Ensure we have at least one serendipity article if we're missing any required types
-        if (!relatedArticles.some(a => a.type === 'direct') ||
-            !relatedArticles.some(a => a.type === 'related') ||
-            !relatedArticles.some(a => a.type === 'broader')) {
-          const serendipityArticle = serendipityArticles[0];
-          if (serendipityArticle) {
-            relatedArticles.push(serendipityArticle);
-          }
-        }
-
-        // Fill remaining slots with serendipity articles
-        if (relatedArticles.length < 9) {
-          relatedArticles.push(...serendipityArticles.slice(1, 10 - relatedArticles.length));
-        }
-      }
-
-      // Ensure we only take 9 articles
-      const finalArticles = relatedArticles.slice(0, 9);
-
+      // 4. Set article data only when everything is ready
       setCurrentArticle({
         title: title,
         definition: extract,
         image: mainImage,
         category: relevantCategory,
-        relatedArticles: finalArticles
+        relatedArticles: relatedArticles.slice(0, 9)
       });
-      break; // Success, exit the retry loop
-    } catch (err) {
-      retries++;
-      if (retries === MAX_RETRIES) {
-        setError('Failed to fetch article data after multiple attempts. Please try again.');
-        console.error('Error fetching data:', err);
-      } else {
-        await delay(RETRY_DELAY);
-        continue;
-      }
-    }
-    }
-    setIsLoading(false);
-    // Clear any existing timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    // Add a small delay before showing content for smooth transition
-    timeoutRef.current = setTimeout(() => {
+
+      // 5. Update URL and show content
+      navigate(`/article/${encodeURIComponent(title)}`, { replace: false });
+      setIsLoading(false);
       setShowContent(true);
-    }, 100);
+      
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unknown error occurred');
+      }
+      console.error('Error fetching data:', err);
+      setIsLoading(false);
+      setShowContent(false);
+    }
   };
 
-  const fetchRandomArticle = async () => {
-    let retries = 0;
+  const fetchRandomArticle = async (retryCount = 0): Promise<void> => {
+    stopSpeech();
+    setIsLoading(true);
+    setShowContent(false);
+    setError(null);
     
-    while (retries < MAX_RETRIES) {
     try {
       const response = await fetch(
         'https://en.wikipedia.org/w/api.php?action=query&format=json&list=random&rnnamespace=0&rnlimit=1&origin=*&rnminsize=3000&rnfilterredir=nonredirects'
@@ -504,45 +276,47 @@ function App(): JSX.Element {
         throw new Error('Failed to fetch random article');
       }
       
-      const data = await response.json();
-      const title = data.query.random[0].title;
-      try {
-        await fetchArticleData(title);
-        break; // Success, exit the retry loop
-      } catch (err) {
-        retries++;
-        if (retries === MAX_RETRIES) {
-          throw err;
+      const data: WikiRandomResponse = await response.json();
+      await fetchArticleData(data.query.random[0].title).catch(async (err) => {
+        if (retryCount < 4) { // Try up to 5 times (initial + 4 retries)
+          console.log(`Retrying... Attempt ${retryCount + 2}/5`);
+          await fetchRandomArticle(retryCount + 1);
+        } else {
+          throw err; // If all retries fail, throw the error
         }
-        await delay(RETRY_DELAY);
-        continue;
-      }
-    } catch (err) {
-      retries++;
-      if (retries === MAX_RETRIES) {
-        setError('Failed to fetch a valid article after multiple attempts. Please try again.');
-        console.error('Error fetching random article:', err);
+      });
+      
+    } catch (err: unknown) {
+      if (retryCount < 4) {
+        console.log(`Retrying... Attempt ${retryCount + 2}/5`);
+        await fetchRandomArticle(retryCount + 1);
       } else {
-        await delay(RETRY_DELAY);
-        continue;
+        if (err instanceof Error) {
+          setError(err.message);
+        } else {
+          setError('Failed to fetch a random article. Please try again.');
+        }
+        console.error('Error fetching random article:', err);
+        setIsLoading(false);
       }
-    }
-      setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    if (isInitialMount.current) {
+    if (articleTitle) {
+      fetchArticleData(decodeURIComponent(articleTitle));
+    } else if (isInitialMount.current) {
       isInitialMount.current = false;
       fetchRandomArticle();
     }
-  }, []);
+  }, [articleTitle]);
 
-  // Cleanup timeout on unmount
   useEffect(() => {
+    setFavicon();
     return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
+      const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+      if (favicon) {
+        favicon.href = '/favicon.ico';
       }
     };
   }, []);
@@ -607,7 +381,7 @@ function App(): JSX.Element {
           onClick={() => setIsExpanded(!isExpanded)}
         >
           {isLoading ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/95 dark:bg-gray-800/95 rounded-2xl">
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/95 dark:bg-gray-800/95 rounded-2xl w-full px-10">
               <LoadingFacts />
             </div>
           ) : error ? (
@@ -624,10 +398,43 @@ function App(): JSX.Element {
               </button>
             </div>
           ) : currentArticle && (
-            <div className={`flex flex-col transform transition-all duration-700 ease-out ${
-              showContent ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+            <div className={`flex flex-col ${
+              showContent ? 'block' : 'hidden'
             }`}>
-              <div className="flex justify-between items-start mb-6 relative">
+              {/* Image Section */}
+              {currentArticle.image && (
+                <div 
+                  className={`w-full overflow-hidden rounded-xl relative transition-all duration-500 cursor-pointer mb-8 ${
+                    isImageExpanded ? 'h-[800px]' : isExpanded ? 'h-[600px]' : 'h-[400px]'
+                  }`}
+                  onClick={(e: MouseEvent<HTMLDivElement>) => {
+                    e.stopPropagation();
+                    setIsImageExpanded(!isImageExpanded);
+                  }}
+                >
+                  <img
+                    src={currentArticle.image.url}
+                    alt={currentArticle.image.caption || currentArticle.title}
+                    className={`w-full h-full object-cover transition-all duration-500 ${
+                      isImageExpanded ? 'scale-110' : isExpanded ? 'scale-105' : 'scale-100'
+                    }`}
+                    style={{ objectPosition: currentArticle.image.position || 'center' }}
+                  />
+                  {currentArticle.image.caption && currentArticle.image.caption !== '' && (
+                    <div className="absolute top-0 right-0 bg-black/50 text-white p-2 text-sm rounded-bl-lg">
+                      {currentArticle.image.caption}
+                    </div>
+                  )}
+                  {currentArticle.image.credit && (
+                    <div className="absolute bottom-0 right-0 bg-black/50 text-white p-2 text-xs rounded-tl-lg">
+                      Photo: {currentArticle.image.credit}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Title and Category Section */}
+              <div className="flex justify-between items-start mb-8 relative">
                 <div className="flex-1 flex items-start space-x-4">
                   <BookOpen className="h-10 w-10 text-amber-600 dark:text-amber-500 flex-shrink-0" weight="duotone" />
                   <div className="flex-1 flex items-start justify-between">
@@ -653,7 +460,7 @@ function App(): JSX.Element {
                 isExpanded ? 'opacity-100' : 'opacity-0'
               }`}>
                 <div className={`space-y-4 transition-all duration-500 ease-out overflow-hidden ${
-                  isExpanded ? 'opacity-100' : 'opacity-0 h-0'
+                  isExpanded ? 'opacity-100 pb-12' : 'opacity-0 h-0'
                 }`}>
                   {currentArticle.definition.split('\n\n').map((paragraph, index) => (
                     <p key={index} className="text-gray-700 dark:text-gray-200">
@@ -663,19 +470,46 @@ function App(): JSX.Element {
                 </div>
               </div>
               
-              {!isExpanded && (
-                <div className="flex justify-center mt-4 transition-opacity duration-500">
-                  <Sparkle className="h-6 w-6 text-amber-400 dark:text-amber-500 animate-pulse" weight="fill" />
+              {!isExpanded ? (
+                <div className="flex flex-col items-center mt-4 transition-opacity duration-500">
+                  <Sparkle 
+                    className="h-6 w-6 text-amber-400 dark:text-amber-500 mb-4 animate-pulse" 
+                    weight="fill" 
+                  />
+                  <p className="group flex items-center gap-2 text-gray-500 dark:text-gray-400 italic text-center group-hover:text-amber-400 dark:group-hover:text-amber-500 cursor-pointer">
+                    Click to reveal
+                    <span className="inline-block transition-transform duration-300 group-hover:translate-y-1">↓</span>
+                  </p>
                 </div>
+              ) : (
+                <p className="group flex items-center gap-2 text-gray-500 dark:text-gray-400 italic text-center mt-4 group-hover:text-amber-400 dark:group-hover:text-amber-500 cursor-pointer">
+                  Click to collapse
+                  <span className="inline-block transition-transform duration-300 group-hover:-translate-y-1">↑</span>
+                </p>
               )}
               
-              <div className="absolute bottom-4 right-4">
+              {/* Bottom controls */}
+              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-10">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(
+                      isExpanded ? currentArticle.definition : currentArticle.definition.split('\n\n')[0]
+                    );
+                    setShowCopied(true);
+                    setTimeout(() => setShowCopied(false), 2000);
+                  }}
+                  className="group flex items-center gap-2 transition-colors relative"
+                  aria-label="Copy article text"
+                >
+                  <Copy className="h-5 w-5 text-amber-400 dark:text-amber-500 transition-transform duration-300 group-hover:scale-110" weight="duotone" />
+                  <span className="text-sm text-gray-500 dark:text-gray-400 group-hover:text-amber-400 dark:group-hover:text-amber-500">
+                    {showCopied ? 'Copied!' : 'Copy text'}
+                  </span>
+                </button>
+
                 <ReadItToMe text={isExpanded ? currentArticle.definition : currentArticle.definition.split('\n\n')[0]} />
               </div>
-              
-              <p className="text-gray-600 dark:text-gray-300 italic text-center mt-4">
-                {isExpanded ? 'Click to collapse' : 'Click to reveal...'}
-              </p>
             </div>
           )}
         </div>
@@ -683,8 +517,8 @@ function App(): JSX.Element {
         {/* Related Articles Section */}
         {currentArticle && !isLoading && !error && (
           <>
-            <div className={`mt-16 grid grid-cols-1 md:grid-cols-3 gap-8 transition-all duration-500 ${
-              showContent ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
+            <div className={`mt-16 grid grid-cols-1 md:grid-cols-3 gap-8 ${
+              showContent ? 'block' : 'hidden'
             }`}>
               {currentArticle.relatedArticles
                 .sort((a, b) => {
@@ -694,14 +528,14 @@ function App(): JSX.Element {
                 .map((related, index) => (
                 <div
                   key={index}
-                  className={`relative overflow-hidden group transition-all duration-500 ${
-                    showContent ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-                  }`}
-                  style={{ transitionDelay: `${index * 100}ms` }}
+                  className="relative overflow-hidden group opacity-0 animate-fadeIn"
+                  style={{ 
+                    animationDelay: `${index * 100}ms`,
+                    animationFillMode: 'forwards'
+                  }}
                   onClick={() => fetchArticleData(related.title)}
                   role="button"
                   tabIndex={0}
-                  onKeyDown={(e) => e.key === 'Enter' && fetchArticleData(related.title)}
                 >
                   <div className="relative bg-white dark:bg-gray-800 backdrop-blur-sm rounded-2xl shadow-lg transform transition-transform duration-300 group-hover:-translate-y-1">
                     <div className="aspect-[3/1.5] w-full overflow-hidden rounded-t-2xl bg-gray-100 dark:bg-gray-700 shadow-sm relative">
@@ -748,20 +582,24 @@ function App(): JSX.Element {
               ))}
             </div>
 
-            {/* New Article button - closer to cards */}
+            {/* New Article button with animation */}
             <div className="mt-8 text-center">
               <button
                 onClick={fetchRandomArticle}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium transition-colors"
+                className="group inline-flex items-center gap-3 px-8 py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
               >
-                <Compass className="h-5 w-5" weight="fill" />
-                <span>New Article</span>
+                <Compass 
+                  className="h-5 w-5 transition-transform duration-300 group-hover:rotate-180" 
+                  weight="duotone"
+                />
+                <span className="text-lg">Discover Another Story</span>
+                <span className="inline-block transition-transform duration-300 group-hover:translate-x-1">→</span>
               </button>
             </div>
 
             {/* Article Type Key - with more spacing */}
-            <div className={`mt-16 flex justify-center transition-all duration-500 ${
-              showContent ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
+            <div className={`mt-16 flex justify-center ${
+              showContent ? 'block' : 'hidden'
             }`}>
               <div className="inline-block bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl p-4 shadow-lg">
                 <div className="grid gap-3">
