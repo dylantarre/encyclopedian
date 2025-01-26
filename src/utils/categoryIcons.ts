@@ -1,35 +1,40 @@
-import { MusicNote, Palette, Flask, Globe, Users, Buildings, Code, GameController, Camera, BookOpen } from '@phosphor-icons/react';
+import { 
+  BookOpen, 
+  Leaf, 
+  Buildings, 
+  Person, 
+  Globe, 
+  Atom, 
+  PaintBrush, 
+  MusicNote, 
+  FilmSlate, 
+  GameController, 
+  Heart, 
+  Brain, 
+  Sword, 
+  Calculator, 
+  Rocket, 
+  Plant 
+} from '@phosphor-icons/react';
 
-export const getCategoryIcon = (category: string) => {
-  const normalizedText = category.toLowerCase();
+export const getCategoryIcon = (text: string) => {
+  const lowerText = text.toLowerCase();
   
-  if (normalizedText.includes('music') || normalizedText.includes('song') || normalizedText.includes('concert') || normalizedText.includes('band')) {
-    return MusicNote;
-  }
-  if (normalizedText.includes('art') || normalizedText.includes('paint') || normalizedText.includes('draw') || normalizedText.includes('design')) {
-    return Palette;
-  }
-  if (normalizedText.includes('science') || normalizedText.includes('chemistry') || normalizedText.includes('physics') || normalizedText.includes('experiment')) {
-    return Flask;
-  }
-  if (normalizedText.includes('geography') || normalizedText.includes('place') || normalizedText.includes('country') || normalizedText.includes('city')) {
-    return Globe;
-  }
-  if (normalizedText.includes('people') || normalizedText.includes('society') || normalizedText.includes('community') || normalizedText.includes('culture')) {
-    return Users;
-  }
-  if (normalizedText.includes('history') || normalizedText.includes('politics') || normalizedText.includes('war') || normalizedText.includes('empire')) {
-    return Buildings;
-  }
-  if (normalizedText.includes('technology') || normalizedText.includes('computer') || normalizedText.includes('software') || normalizedText.includes('digital')) {
-    return Code;
-  }
-  if (normalizedText.includes('game') || normalizedText.includes('sport') || normalizedText.includes('play') || normalizedText.includes('athlete')) {
-    return GameController;
-  }
-  if (normalizedText.includes('film') || normalizedText.includes('movie') || normalizedText.includes('cinema') || normalizedText.includes('camera')) {
-    return Camera;
-  }
+  // Never return BookOpen for related articles
+  if (lowerText.includes('history') || lowerText.includes('war') || lowerText.includes('battle')) return Sword;
+  if (lowerText.includes('science') || lowerText.includes('physics') || lowerText.includes('chemistry')) return Atom;
+  if (lowerText.includes('art') || lowerText.includes('paint')) return PaintBrush;
+  if (lowerText.includes('music') || lowerText.includes('song') || lowerText.includes('album')) return MusicNote;
+  if (lowerText.includes('film') || lowerText.includes('movie') || lowerText.includes('cinema')) return FilmSlate;
+  if (lowerText.includes('game') || lowerText.includes('play')) return GameController;
+  if (lowerText.includes('health') || lowerText.includes('medical')) return Heart;
+  if (lowerText.includes('philosophy') || lowerText.includes('psychology')) return Brain;
+  if (lowerText.includes('math') || lowerText.includes('calculation')) return Calculator;
+  if (lowerText.includes('space') || lowerText.includes('astronomy')) return Rocket;
+  if (lowerText.includes('nature') || lowerText.includes('environment')) return Leaf;
+  if (lowerText.includes('city') || lowerText.includes('architecture')) return Buildings;
+  if (lowerText.includes('person') || lowerText.includes('biography')) return Person;
   
-  return BookOpen;
+  // Default to Globe instead of BookOpen
+  return Globe;
 }; 

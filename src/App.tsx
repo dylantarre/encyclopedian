@@ -76,6 +76,8 @@ function App(): JSX.Element {
   const [showCopied, setShowCopied] = useState(false);
   const navigate = useNavigate();
   const { articleTitle } = useParams();
+  const isLoadingRef = useRef(false);
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
 
   const stopSpeech = () => {
     window.speechSynthesis.cancel();
@@ -119,28 +121,34 @@ function App(): JSX.Element {
   };
 
   const fetchArticleImage = async (title: string) => {
-    // Fetch image for main article
-    const imageResponse = await fetch(
-      `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages|imageinfo&piprop=original|thumbnail&pithumbsize=1000&iiprop=user|extmetadata&titles=${encodeURIComponent(title)}&origin=*`
-    );
+    try {
+      console.log('Fetching image for:', title);
+      const imageResponse = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages&piprop=thumbnail|original&pithumbsize=1000&titles=${encodeURIComponent(title)}&origin=*`
+      );
+      
+      if (!imageResponse.ok) {
+        console.warn('Failed to fetch image:', imageResponse.statusText);
+        return null;
+      }
 
-    if (!imageResponse.ok) {
-      return null;
-    }
+      const imageData = await imageResponse.json();
+      console.log('Image data:', imageData);
+      
+      const imagePages = imageData.query.pages;
+      const imagePage = imagePages[Object.keys(imagePages)[0]];
+      let mainImagePosition = 'center 25%';
 
-    const imageData = await imageResponse.json();
-    const imagePages = imageData.query.pages;
-    const imagePage = imagePages[Object.keys(imagePages)[0]];
-    let mainImagePosition = 'center 25%';
-    let imageCredit = '';
+      // Get the actual image URL
+      const imageUrl = imagePage.thumbnail?.source;
+      if (!imageUrl) {
+        console.warn('No image URL found');
+        return null;
+      }
 
-    if (imagePage.imageinfo?.[0]) {
-      const info = imagePage.imageinfo[0];
-      imageCredit = info.extmetadata?.Artist?.value || info.user || '';
-    }
+      console.log('Found image URL:', imageUrl);
 
-    if (imagePage.original || imagePage.thumbnail) {
-      const imageUrl = imagePage.original?.source || imagePage.thumbnail?.source;
+      // Try to get cached position first
       const cachedPosition = imagePositionCache.get(imageUrl);
       if (cachedPosition) {
         mainImagePosition = cachedPosition;
@@ -151,13 +159,14 @@ function App(): JSX.Element {
 
       return {
         url: imageUrl,
-        caption: imagePage.imageinfo?.[0]?.extmetadata?.ImageDescription?.value || '',
-        credit: imageCredit,
+        caption: '',
+        credit: '',
         position: mainImagePosition
       };
+    } catch (err) {
+      console.error('Error fetching image:', err);
+      return null;
     }
-
-    return null;
   };
 
   const fetchRelatedArticles = async (links: Array<{ title: string }>) => {
@@ -200,15 +209,23 @@ function App(): JSX.Element {
   };
 
   const fetchArticleData = async (title: string): Promise<void> => {
+    if (isLoadingRef.current) {
+      console.log('Already loading, skipping fetch');
+      return;
+    }
+    
     try {
-      // 1. Clear everything and show loading
-      stopSpeech();
-      setCurrentArticle(null);  // Clear current article
-      setIsLoading(true);
-      setError(null);
-      setShowContent(false);
+      console.log('Starting fetch for:', title);
+      isLoadingRef.current = true;
       
-      // 2. Fetch main article data
+      // Clear everything at once
+      setShowContent(false);
+      setCurrentArticle(null);
+      stopSpeech();
+      setError(null);
+      setIsLoading(true);
+      
+      // Fetch and process all data first
       const contentResponse = await fetch(
         `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts|categories|links&explaintext=1&exsectionformat=plain&exlimit=1&titles=${encodeURIComponent(title)}&pllimit=50&origin=*`
       );
@@ -220,7 +237,7 @@ function App(): JSX.Element {
       const contentData: WikiContentResponse = await contentResponse.json();
       const pages = contentData.query.pages;
       const page = pages[Object.keys(pages)[0]];
-      
+
       if (page.missing) {
         throw new Error('Article not found');
       }
@@ -235,29 +252,35 @@ function App(): JSX.Element {
         fetchRelatedArticles(page.links || [])
       ]);
 
-      // 4. Set article data only when everything is ready
-      setCurrentArticle({
+      // 4. Set all data at once when everything is ready
+      const articleData = {
         title: title,
         definition: extract,
         image: mainImage,
         category: relevantCategory,
         relatedArticles: relatedArticles.slice(0, 9)
-      });
+      };
 
-      // 5. Update URL and show content
-      navigate(`/article/${encodeURIComponent(title)}`, { replace: false });
+      console.log('Fetch complete, updating state');
+      setCurrentArticle(articleData);
       setIsLoading(false);
       setShowContent(true);
+
+      // Update URL last, after content is loaded
+      navigate(`/article/${encodeURIComponent(title)}`, { replace: true });
       
     } catch (err: unknown) {
+      console.error('Fetch failed:', err);
       if (err instanceof Error) {
         setError(err.message);
       } else {
         setError('An unknown error occurred');
       }
-      console.error('Error fetching data:', err);
       setIsLoading(false);
       setShowContent(false);
+    } finally {
+      isLoadingRef.current = false;
+      console.log('Fetch cycle complete');
     }
   };
 
@@ -303,13 +326,34 @@ function App(): JSX.Element {
   };
 
   useEffect(() => {
-    if (articleTitle) {
-      fetchArticleData(decodeURIComponent(articleTitle));
-    } else if (isInitialMount.current) {
+    // Skip the first render since we'll fetch random article
+    if (isInitialMount.current) {
       isInitialMount.current = false;
-      fetchRandomArticle();
+      if (!articleTitle) {
+        fetchRandomArticle();
+      }
+      return;
     }
-  }, [articleTitle]);
+
+    let isCancelled = false;
+
+    // Only fetch if we have a title and it's different from current
+    if (articleTitle && (!currentArticle || articleTitle !== currentArticle.title)) {
+      console.log('URL changed, fetching:', articleTitle);
+      const title = decodeURIComponent(articleTitle);
+      
+      // Wait for any current fetch to complete
+      setTimeout(() => {
+        if (!isCancelled && !isLoadingRef.current) {
+          fetchArticleData(title);
+        }
+      }, 100);
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [articleTitle, currentArticle?.title]);
 
   useEffect(() => {
     setFavicon();
@@ -326,7 +370,10 @@ function App(): JSX.Element {
       <header className="bg-white dark:bg-gray-800 shadow-sm transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
-            <div className="flex items-center space-x-3">
+            {/* Logo and brand */}
+            <div className={`flex items-center space-x-3 transition-all duration-300 ${
+              isSearchExpanded ? 'hidden md:flex' : 'flex'
+            }`}>
               <a 
                 href="/"
                 className="flex items-center space-x-3 hover:opacity-80 transition-opacity"
@@ -336,29 +383,63 @@ function App(): JSX.Element {
                 }}
               >
                 <Book className="h-8 w-8 text-amber-600 dark:text-amber-500" weight="duotone" />
-                <h1 className="text-2xl font-playfair font-bold text-gray-900 dark:text-white">Encyclopedian</h1>
+                <h1 className="text-2xl font-playfair font-bold text-gray-900 dark:text-white">
+                  Encyclopedian
+                </h1>
               </a>
             </div>
-            <div className="flex items-center space-x-4">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search knowledge..."
-                  className="pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-300"
-                  value={searchQuery}
-                  onChange={handleSearch}
-                />
-                <MagnifyingGlass className="absolute left-3 top-2.5 h-5 w-5 text-gray-400 dark:text-gray-300" weight="thin" />
+
+            {/* Search and theme controls */}
+            <div className="flex items-center justify-between gap-4">
+              {/* Search with expand/collapse on mobile */}
+              <div className="relative flex-1 md:max-w-md">
+                <div className={`flex items-center transition-all duration-300 ${
+                  isSearchExpanded ? 'w-full' : 'w-10 md:w-full'
+                }`}>
+                  {/* Search icon/button for mobile */}
+                  <button 
+                    className="md:hidden absolute left-3 text-gray-400"
+                    onClick={() => setIsSearchExpanded(!isSearchExpanded)}
+                    aria-label="Toggle search"
+                  >
+                    <MagnifyingGlass className="h-5 w-5" weight="duotone" />
+                  </button>
+
+                  {/* Search input */}
+                  <input
+                    type="text"
+                    placeholder="Search articles..."
+                    value={searchQuery}
+                    onChange={handleSearch}
+                    className={`w-full bg-gray-100 dark:bg-gray-800 dark:text-white rounded-lg pl-10 pr-4 py-2 text-sm transition-all duration-300 ${
+                      isSearchExpanded ? 'opacity-100' : 'opacity-0 md:opacity-100'
+                    }`}
+                    style={{ 
+                      width: isSearchExpanded ? '100%' : '40px',
+                      cursor: isSearchExpanded ? 'text' : 'pointer',
+                    }}
+                    onClick={() => !isSearchExpanded && setIsSearchExpanded(true)}
+                  />
+
+                  {/* Desktop search icon */}
+                  <div className="hidden md:block absolute left-3 text-gray-400">
+                    <MagnifyingGlass className="h-5 w-5" weight="duotone" />
+                  </div>
+                </div>
               </div>
+
+              {/* Theme toggle - hide on mobile when search is expanded */}
               <button
                 onClick={toggleTheme}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+                className={`transition-all duration-300 ${
+                  isSearchExpanded ? 'hidden md:block' : 'block'
+                }`}
                 aria-label="Toggle theme"
               >
                 {isDark ? (
-                  <Sun className="h-5 w-5 text-amber-500" weight="duotone" />
+                  <Sun className="h-5 w-5 text-amber-400" weight="duotone" />
                 ) : (
-                  <Moon className="h-5 w-5 text-gray-600" weight="duotone" />
+                  <Moon className="h-5 w-5 text-amber-400" weight="duotone" />
                 )}
               </button>
             </div>
@@ -470,22 +551,26 @@ function App(): JSX.Element {
                 </div>
               </div>
               
-              {!isExpanded ? (
-                <div className="flex flex-col items-center mt-4 transition-opacity duration-500">
+              {isExpanded ? (
+                <div className="flex justify-center mt-4">
+                  <p className="text-gray-600 dark:text-gray-300 italic text-center group">
+                    <span className="inline-flex items-center gap-2 transition-all duration-300 group-hover:text-amber-400 dark:group-hover:text-amber-500">
+                      Click to collapse
+                      <span className="inline-block transition-transform duration-300 group-hover:-translate-y-1">↑</span>
+                    </span>
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center mt-4 transition-opacity duration-500 group">
                   <Sparkle 
                     className="h-6 w-6 text-amber-400 dark:text-amber-500 mb-4 animate-pulse" 
                     weight="fill" 
                   />
-                  <p className="group flex items-center gap-2 text-gray-500 dark:text-gray-400 italic text-center group-hover:text-amber-400 dark:group-hover:text-amber-500 cursor-pointer">
+                  <p className="text-gray-600 dark:text-gray-300 italic text-center group-hover:text-amber-400 dark:group-hover:text-amber-500">
                     Click to reveal
-                    <span className="inline-block transition-transform duration-300 group-hover:translate-y-1">↓</span>
+                    <span className="inline-block transition-transform duration-300 group-hover:translate-y-1 ml-2">↓</span>
                   </p>
                 </div>
-              ) : (
-                <p className="group flex items-center gap-2 text-gray-500 dark:text-gray-400 italic text-center mt-4 group-hover:text-amber-400 dark:group-hover:text-amber-500 cursor-pointer">
-                  Click to collapse
-                  <span className="inline-block transition-transform duration-300 group-hover:-translate-y-1">↑</span>
-                </p>
               )}
               
               {/* Bottom controls */}
@@ -505,7 +590,7 @@ function App(): JSX.Element {
                   <Copy className="h-5 w-5 text-amber-400 dark:text-amber-500 transition-transform duration-300 group-hover:scale-110" weight="duotone" />
                   <span className="text-sm text-gray-500 dark:text-gray-400 group-hover:text-amber-400 dark:group-hover:text-amber-500">
                     {showCopied ? 'Copied!' : 'Copy text'}
-                  </span>
+                    </span>
                 </button>
 
                 <ReadItToMe text={isExpanded ? currentArticle.definition : currentArticle.definition.split('\n\n')[0]} />
@@ -519,73 +604,73 @@ function App(): JSX.Element {
           <>
             <div className={`mt-16 grid grid-cols-1 md:grid-cols-3 gap-8 ${
               showContent ? 'block' : 'hidden'
-            }`}>
-              {currentArticle.relatedArticles
-                .sort((a, b) => {
-                  const typeOrder = { direct: 0, related: 1, broader: 2 };
-                  return typeOrder[a.type as keyof typeof typeOrder] - typeOrder[b.type as keyof typeof typeOrder];
-                })
-                .map((related, index) => (
-                <div
-                  key={index}
+          }`}>
+            {currentArticle.relatedArticles
+              .sort((a, b) => {
+                const typeOrder = { direct: 0, related: 1, broader: 2 };
+                return typeOrder[a.type as keyof typeof typeOrder] - typeOrder[b.type as keyof typeof typeOrder];
+              })
+              .map((related, index) => (
+              <div
+                key={index}
                   className="relative overflow-hidden group opacity-0 animate-fadeIn"
                   style={{ 
                     animationDelay: `${index * 100}ms`,
                     animationFillMode: 'forwards'
                   }}
-                  onClick={() => fetchArticleData(related.title)}
-                  role="button"
-                  tabIndex={0}
-                >
+                onClick={() => fetchArticleData(related.title)}
+                role="button"
+                tabIndex={0}
+              >
                   <div className="relative bg-white dark:bg-gray-800 backdrop-blur-sm rounded-2xl shadow-lg transform transition-transform duration-300 group-hover:-translate-y-1">
-                    <div className="aspect-[3/1.5] w-full overflow-hidden rounded-t-2xl bg-gray-100 dark:bg-gray-700 shadow-sm relative">
-                      {related.image ? (
-                        <img
-                          src={related.image.url}
-                          alt={related.image.caption}
-                         className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                         style={{ objectPosition: related.image.position }}
-                        />
-                      ) : (
-                        <div className="h-full w-full bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-gray-700 flex items-center justify-center relative overflow-hidden group-hover:scale-105 transition-transform duration-300">
-                          <div className="absolute inset-0 bg-gradient-to-br from-transparent to-amber-100/30 dark:from-transparent dark:to-amber-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                          {React.createElement(getCategoryIcon(related.title + ' ' + related.extract), {
-                            className: "h-16 w-16 text-amber-500/50 dark:text-amber-400/50 transform group-hover:scale-110 group-hover:rotate-3 transition-all duration-300",
-                            strokeWidth: 1.5
-                          })}
-                          <div className="absolute inset-0 bg-gradient-to-b from-amber-50/30 dark:from-gray-800/30 to-transparent" />
-                        </div>
-                      )}
-                    </div>
-                    <span className={`absolute top-3 right-3 px-2.5 py-1 text-xs font-medium shadow-sm ${
-                    related.type === 'direct' ? 'bg-emerald-500 text-white' :
-                    related.type === 'related' ? 'bg-purple-500 text-white' :
-                    related.type === 'broader' ? 'bg-blue-500 text-white' :
-                    'bg-indigo-500 text-white'
-                    } rounded-full shadow-md`}>
-                    {related.type === 'direct' ? '✨ Down the Rabbit Hole' :
-                     related.type === 'related' ? '🔄 Plot Twist' :
-                     related.type === 'broader' ? '🌟 Mind Expansion' :
-                     '🌌 Quantum Leap'}
-                    </span>
+                  <div className="aspect-[3/1.5] w-full overflow-hidden rounded-t-2xl bg-gray-100 dark:bg-gray-700 shadow-sm relative">
+                    {related.image ? (
+                      <img
+                        src={related.image.url}
+                        alt={related.image.caption}
+                       className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                       style={{ objectPosition: related.image.position }}
+                      />
+                    ) : (
+                      <div className="h-full w-full bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-gray-700 flex items-center justify-center relative overflow-hidden group-hover:scale-105 transition-transform duration-300">
+                        <div className="absolute inset-0 bg-gradient-to-br from-transparent to-amber-100/30 dark:from-transparent dark:to-amber-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                        {React.createElement(getCategoryIcon(related.title + ' ' + related.extract), {
+                          className: "h-16 w-16 text-amber-500/50 dark:text-amber-400/50 transform group-hover:scale-110 group-hover:rotate-3 transition-all duration-300",
+                          strokeWidth: 1.5
+                        })}
+                        <div className="absolute inset-0 bg-gradient-to-b from-amber-50/30 dark:from-gray-800/30 to-transparent" />
+                      </div>
+                    )}
                   </div>
-                  <div className="p-4">
-                    <h4 className="font-playfair font-bold text-xl text-gray-900 dark:text-white group-hover:text-amber-500 transition-colors leading-snug mb-2">
-                      {related.title}
-                    </h4>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed">
-                      {related.extract}
-                    </p>
-                  </div>
-                  <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-gray-900/5 dark:ring-white/5 group-hover:ring-amber-500/20 transition-colors"></div>
+                  <span className={`absolute top-3 right-3 px-2.5 py-1 text-xs font-medium shadow-sm ${
+                  related.type === 'direct' ? 'bg-emerald-500 text-white' :
+                  related.type === 'related' ? 'bg-purple-500 text-white' :
+                  related.type === 'broader' ? 'bg-blue-500 text-white' :
+                  'bg-indigo-500 text-white'
+                  } rounded-full shadow-md`}>
+                  {related.type === 'direct' ? '✨ Down the Rabbit Hole' :
+                   related.type === 'related' ? '🔄 Plot Twist' :
+                   related.type === 'broader' ? '🌟 Mind Expansion' :
+                   '🌌 Quantum Leap'}
+                  </span>
                 </div>
-              ))}
-            </div>
+                <div className="p-4">
+                  <h4 className="font-playfair font-bold text-xl text-gray-900 dark:text-white group-hover:text-amber-500 transition-colors leading-snug mb-2">
+                    {related.title}
+                  </h4>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed">
+                    {related.extract}
+                  </p>
+                </div>
+                <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-gray-900/5 dark:ring-white/5 group-hover:ring-amber-500/20 transition-colors"></div>
+              </div>
+            ))}
+          </div>
 
             {/* New Article button with animation */}
             <div className="mt-8 text-center">
-              <button
-                onClick={fetchRandomArticle}
+          <button
+            onClick={fetchRandomArticle}
                 className="group inline-flex items-center gap-3 px-8 py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
               >
                 <Compass 
@@ -594,8 +679,8 @@ function App(): JSX.Element {
                 />
                 <span className="text-lg">Discover Another Story</span>
                 <span className="inline-block transition-transform duration-300 group-hover:translate-x-1">→</span>
-              </button>
-            </div>
+          </button>
+          </div>
 
             {/* Article Type Key - with more spacing */}
             <div className={`mt-16 flex justify-center ${
@@ -603,37 +688,37 @@ function App(): JSX.Element {
             }`}>
               <div className="inline-block bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl p-4 shadow-lg">
                 <div className="grid gap-3">
-                  <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-3">
                     <span className="px-2 py-0.5 text-xs font-medium bg-emerald-500 text-white rounded-full shadow-sm whitespace-nowrap">
-                      ✨ Down the Rabbit Hole
-                    </span>
-                    <p className="text-sm text-gray-600 dark:text-gray-300">
+                  ✨ Down the Rabbit Hole
+                </span>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
                       Deep dives into specific aspects
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-3">
+                </p>
+              </div>
+              <div className="flex items-center space-x-3">
                     <span className="px-2 py-0.5 text-xs font-medium bg-purple-500 text-white rounded-full shadow-sm whitespace-nowrap">
-                      🔄 Plot Twist
-                    </span>
-                    <p className="text-sm text-gray-600 dark:text-gray-300">
+                  🔄 Plot Twist
+                </span>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
                       Interesting related connections
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-3">
+                </p>
+              </div>
+              <div className="flex items-center space-x-3">
                     <span className="px-2 py-0.5 text-xs font-medium bg-blue-500 text-white rounded-full shadow-sm whitespace-nowrap">
-                      🌟 Mind Expansion
-                    </span>
-                    <p className="text-sm text-gray-600 dark:text-gray-300">
+                  🌟 Mind Expansion
+                </span>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
                       Broader context and concepts
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-3">
+                </p>
+              </div>
+              <div className="flex items-center space-x-3">
                     <span className="px-2 py-0.5 text-xs font-medium bg-indigo-500 text-white rounded-full shadow-sm whitespace-nowrap">
-                      🌌 Quantum Leap
-                    </span>
-                    <p className="text-sm text-gray-600 dark:text-gray-300">
+                  🌌 Quantum Leap
+                </span>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
                       Find unexpected discoveries
-                    </p>
+                </p>
                   </div>
                 </div>
               </div>

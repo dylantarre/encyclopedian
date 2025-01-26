@@ -36,4 +36,17 @@ export interface WikiRandomResponse {
       title: string;
     }>;
   };
+}
+
+export interface ArticleData {
+  title: string;
+  definition: string;
+  image: {
+    url: string;
+    caption: string;
+    credit: string;
+    position: string;
+  } | null;
+  category: string;
+  relatedArticles: RelatedArticle[];
 } 

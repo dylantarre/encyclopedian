@@ -110,7 +110,7 @@ export function LoadingFacts() {
   }, []);
 
   return (
-    <div className="text-center max-w-2xl mx-auto">
+    <div className="w-full text-center px-4">
       <div className="animate-spin h-8 w-8 text-amber-400 dark:text-amber-500 mx-auto mb-8">
         <Sparkle className="h-8 w-8" weight="fill" />
       </div>

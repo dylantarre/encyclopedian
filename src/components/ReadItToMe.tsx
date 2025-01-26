@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { SpeakerHigh, SpeakerX, Pause, Play } from '@phosphor-icons/react';
+import { SpeakerHigh, SpeakerX, Pause, Play, VolumeUp } from '@phosphor-icons/react';
 
 export function ReadItToMe({ text }: { text: string }) {
   const [isLoading, setIsLoading] = useState(false);
@@ -68,26 +68,38 @@ export function ReadItToMe({ text }: { text: string }) {
       <button
         onClick={handleClick}
         disabled={isLoading}
-        className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+        className="group flex items-center gap-2 transition-colors"
+        aria-label={
+          isLoading ? 'Loading...' : 
+          isSpeaking ? (isPaused ? 'Resume reading' : 'Pause reading') : 
+          'Read article aloud'
+        }
       >
         {isLoading ? (
           <>
-            <div className="animate-spin h-4 w-4 border-2 border-gray-500 border-t-transparent rounded-full" />
-            <span>Read it to me</span>
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
+            <span className="text-sm text-gray-500 dark:text-gray-400">Loading...</span>
           </>
         ) : (
           <>
             {isSpeaking ? (
-              isPaused ? <Play className="h-4 w-4" weight="fill" /> : <Pause className="h-4 w-4" weight="fill" />
+              isPaused ? (
+                <>
+                  <Play className="h-4 w-4 md:h-5 md:w-5 text-amber-400 dark:text-amber-500 transition-transform duration-300 group-hover:scale-110" weight="duotone" />
+                  <span className="text-xs md:text-sm text-gray-500 dark:text-gray-400 group-hover:text-amber-400 dark:group-hover:text-amber-500">Resume</span>
+                </>
+              ) : (
+                <>
+                  <Pause className="h-4 w-4 md:h-5 md:w-5 text-amber-400 dark:text-amber-500 transition-transform duration-300 group-hover:scale-110" weight="duotone" />
+                  <span className="text-xs md:text-sm text-gray-500 dark:text-gray-400 group-hover:text-amber-400 dark:group-hover:text-amber-500">Pause</span>
+                </>
+              )
             ) : (
-              <SpeakerHigh className="h-4 w-4" weight="fill" />
+              <>
+                <SpeakerHigh className="h-4 w-4 md:h-5 md:w-5 text-amber-400 dark:text-amber-500 transition-transform duration-300 group-hover:scale-110" weight="duotone" />
+                <span className="text-xs md:text-sm text-gray-500 dark:text-gray-400 group-hover:text-amber-400 dark:group-hover:text-amber-500">Read it to me</span>
+              </>
             )}
-            <span>
-              {isSpeaking 
-                ? (isPaused ? 'Resume' : 'Pause') 
-                : 'Read it to me'
-              }
-            </span>
           </>
         )}
       </button>

@@ -5,3 +5,13 @@
 .font-playfair {
   font-family: 'Playfair Display', serif;
 }
+
+/* Adjust the padding utility class */
+.py-6 {
+  padding-top: 2.5rem !important;
+  padding-bottom: 2.5rem !important;
+}
+
+.custom-padding {
+  padding: 2.5rem;
+}
