@@ -22,7 +22,8 @@ import type {
   WikiRandomResponse 
 } from './types/api';
 import type { ArticleData } from './types';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { initGA, logPageView, logEvent } from './utils/analytics';
 
 // Face detection support check
 const isFaceDetectionSupported = async () => {
@@ -79,6 +80,7 @@ function App(): JSX.Element {
   const isLoadingRef = useRef(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
 
   const stopSpeech = () => {
     window.speechSynthesis.cancel();
@@ -210,6 +212,7 @@ function App(): JSX.Element {
   };
 
   const fetchArticleData = async (title: string): Promise<void> => {
+    logEvent('Article', 'View Article');
     if (isLoadingRef.current) {
       console.log('Already loading, skipping fetch');
       return;
@@ -384,6 +387,14 @@ function App(): JSX.Element {
     };
   }, [isSearchExpanded, searchQuery]);
 
+  useEffect(() => {
+    initGA();
+  }, []);
+
+  useEffect(() => {
+    logPageView(location.pathname);
+  }, [location]);
+
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-900 dark:to-gray-800 font-sans transition-colors duration-200">
       <header className="bg-white dark:bg-gray-800 shadow-sm transition-colors duration-200">
@@ -467,7 +478,7 @@ function App(): JSX.Element {
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <main className="flex-1 max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-8 sm:py-12">
         <div className="text-center mb-12">
           <h2 className="text-5xl font-playfair font-bold text-gray-900 dark:text-white mb-6">
             Explore stories from history
@@ -478,7 +489,7 @@ function App(): JSX.Element {
         </div>
 
         <div 
-          className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-10 transition-all duration-500 ease-in-out cursor-pointer min-h-[300px] relative backdrop-blur-sm bg-opacity-95 dark:bg-opacity-95"
+          className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-4 sm:p-10 transition-all duration-500 ease-in-out cursor-pointer min-h-[300px] relative backdrop-blur-sm bg-opacity-95 dark:bg-opacity-95"
           onClick={() => setIsExpanded(!isExpanded)}
         >
           {isLoading ? (
@@ -537,20 +548,18 @@ function App(): JSX.Element {
               {/* Title and Category Section */}
               <div className="flex flex-col md:flex-row justify-between items-start mb-8 relative">
                 <div className="flex flex-col md:flex-row md:items-start w-full gap-4">
-                  {/* Icon and Category */}
-                  <div className="flex items-center justify-between w-full md:w-auto mb-4 md:mb-0">
+                  {/* Category - right aligned on desktop */}
+                  <div className="flex items-center justify-between w-full md:w-auto mb-4 md:mb-0 md:ml-auto">
                     <div className="flex items-center gap-4">
-                      <BookOpen className="h-10 w-10 text-amber-600 dark:text-amber-500 flex-shrink-0" weight="duotone" />
-                      <div className="flex items-center space-x-3">
-                        <span className="px-4 py-1.5 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded-full text-sm font-medium whitespace-nowrap shadow-sm">
-                          {currentArticle.category}
-                        </span>
-                      </div>
+                      <span className="px-4 py-1.5 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded-full text-sm font-medium whitespace-nowrap shadow-sm">
+                        {currentArticle.category}
+                      </span>
                     </div>
                   </div>
                   
-                  {/* Title */}
-                  <div className="flex-1">
+                  {/* Title with icon */}
+                  <div className="flex-1 md:order-first flex items-start gap-4">
+                    <BookOpen className="h-10 w-10 text-amber-600 dark:text-amber-500 flex-shrink-0" weight="duotone" />
                     <h3 className="text-4xl font-playfair font-bold text-gray-900 dark:text-white leading-tight">
                       {currentArticle.title}
                     </h3>
@@ -601,7 +610,7 @@ function App(): JSX.Element {
               )}
               
               {/* Bottom controls */}
-              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-10">
+              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-4 sm:p-10">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -629,85 +638,85 @@ function App(): JSX.Element {
         {/* Related Articles Section */}
         {currentArticle && !isLoading && !error && (
           <>
-            <div className={`mt-16 grid grid-cols-1 md:grid-cols-3 gap-8 ${
+            <div className={`mt-16 grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-8 ${
               showContent ? 'block' : 'hidden'
-          }`}>
-            {currentArticle.relatedArticles
-              .sort((a, b) => {
-                const typeOrder = { direct: 0, related: 1, broader: 2 };
-                return typeOrder[a.type as keyof typeof typeOrder] - typeOrder[b.type as keyof typeof typeOrder];
-              })
-              .map((related, index) => (
-              <div
-                key={index}
-                  className="relative overflow-hidden group opacity-0 animate-fadeIn"
-                  style={{ 
-                    animationDelay: `${index * 100}ms`,
-                    animationFillMode: 'forwards'
-                  }}
-                onClick={() => fetchArticleData(related.title)}
-                role="button"
-                tabIndex={0}
-              >
-                  <div className="relative bg-white dark:bg-gray-800 backdrop-blur-sm rounded-2xl shadow-lg transform transition-transform duration-300 group-hover:-translate-y-1">
-                  <div className="aspect-[3/1.5] w-full overflow-hidden rounded-t-2xl bg-gray-100 dark:bg-gray-700 shadow-sm relative">
-                    {related.image ? (
-                      <img
-                        src={related.image.url}
-                        alt={related.image.caption}
-                       className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                       style={{ objectPosition: related.image.position }}
-                      />
-                    ) : (
-                      <div className="h-full w-full bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-gray-700 flex items-center justify-center relative overflow-hidden group-hover:scale-105 transition-transform duration-300">
-                        <div className="absolute inset-0 bg-gradient-to-br from-transparent to-amber-100/30 dark:from-transparent dark:to-amber-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                        {React.createElement(getCategoryIcon(related.title + ' ' + related.extract), {
-                          className: "h-16 w-16 text-amber-500/50 dark:text-amber-400/50 transform group-hover:scale-110 group-hover:rotate-3 transition-all duration-300",
-                          strokeWidth: 1.5
-                        })}
-                        <div className="absolute inset-0 bg-gradient-to-b from-amber-50/30 dark:from-gray-800/30 to-transparent" />
-                      </div>
-                    )}
+            }`}>
+              {currentArticle.relatedArticles
+                .sort((a, b) => {
+                  const typeOrder = { direct: 0, related: 1, broader: 2 };
+                  return typeOrder[a.type as keyof typeof typeOrder] - typeOrder[b.type as keyof typeof typeOrder];
+                })
+                .map((related, index) => (
+                <div
+                  key={index}
+                    className="relative overflow-hidden group opacity-0 animate-fadeIn"
+                    style={{ 
+                      animationDelay: `${index * 100}ms`,
+                      animationFillMode: 'forwards'
+                    }}
+                  onClick={() => fetchArticleData(related.title)}
+                  role="button"
+                  tabIndex={0}
+                >
+                    <div className="relative bg-white dark:bg-gray-800 backdrop-blur-sm rounded-2xl shadow-lg transform transition-transform duration-300 group-hover:-translate-y-1">
+                    <div className="aspect-[3/1.5] w-full overflow-hidden rounded-t-2xl bg-gray-100 dark:bg-gray-700 shadow-sm relative">
+                      {related.image ? (
+                        <img
+                          src={related.image.url}
+                          alt={related.image.caption}
+                         className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                         style={{ objectPosition: related.image.position }}
+                        />
+                      ) : (
+                        <div className="h-full w-full bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-gray-700 flex items-center justify-center relative overflow-hidden group-hover:scale-105 transition-transform duration-300">
+                          <div className="absolute inset-0 bg-gradient-to-br from-transparent to-amber-100/30 dark:from-transparent dark:to-amber-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                          {React.createElement(getCategoryIcon(related.title + ' ' + related.extract), {
+                            className: "h-16 w-16 text-amber-500/50 dark:text-amber-400/50 transform group-hover:scale-110 group-hover:rotate-3 transition-all duration-300",
+                            strokeWidth: 1.5
+                          })}
+                          <div className="absolute inset-0 bg-gradient-to-b from-amber-50/30 dark:from-gray-800/30 to-transparent" />
+                        </div>
+                      )}
+                    </div>
+                    <span className={`absolute top-3 right-3 px-2.5 py-1 text-xs font-medium shadow-sm ${
+                    related.type === 'direct' ? 'bg-emerald-500 text-white' :
+                    related.type === 'related' ? 'bg-purple-500 text-white' :
+                    related.type === 'broader' ? 'bg-blue-500 text-white' :
+                    'bg-indigo-500 text-white'
+                    } rounded-full shadow-md`}>
+                    {related.type === 'direct' ? '✨ Down the Rabbit Hole' :
+                     related.type === 'related' ? '🔄 Plot Twist' :
+                     related.type === 'broader' ? '🌟 Mind Expansion' :
+                     '🌌 Quantum Leap'}
+                    </span>
                   </div>
-                  <span className={`absolute top-3 right-3 px-2.5 py-1 text-xs font-medium shadow-sm ${
-                  related.type === 'direct' ? 'bg-emerald-500 text-white' :
-                  related.type === 'related' ? 'bg-purple-500 text-white' :
-                  related.type === 'broader' ? 'bg-blue-500 text-white' :
-                  'bg-indigo-500 text-white'
-                  } rounded-full shadow-md`}>
-                  {related.type === 'direct' ? '✨ Down the Rabbit Hole' :
-                   related.type === 'related' ? '🔄 Plot Twist' :
-                   related.type === 'broader' ? '🌟 Mind Expansion' :
-                   '🌌 Quantum Leap'}
-                  </span>
+                  <div className="p-2 sm:p-4">
+                    <h4 className="font-playfair font-bold text-xl text-gray-900 dark:text-white group-hover:text-amber-500 transition-colors leading-snug mb-2">
+                      {related.title}
+                    </h4>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed">
+                      {related.extract}
+                    </p>
+                  </div>
+                  <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-gray-900/5 dark:ring-white/5 group-hover:ring-amber-500/20 transition-colors"></div>
                 </div>
-                <div className="p-4">
-                  <h4 className="font-playfair font-bold text-xl text-gray-900 dark:text-white group-hover:text-amber-500 transition-colors leading-snug mb-2">
-                    {related.title}
-                  </h4>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed">
-                    {related.extract}
-                  </p>
-                </div>
-                <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-gray-900/5 dark:ring-white/5 group-hover:ring-amber-500/20 transition-colors"></div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
 
             {/* New Article button with animation */}
             <div className="mt-8 text-center">
-          <button
-            onClick={fetchRandomArticle}
-                className="group inline-flex items-center gap-3 px-8 py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
-              >
-                <Compass 
-                  className="h-5 w-5 transition-transform duration-300 group-hover:rotate-180" 
-                  weight="duotone"
-                />
-                <span className="text-lg">Discover Another Story</span>
-                <span className="inline-block transition-transform duration-300 group-hover:translate-x-1">→</span>
-          </button>
-          </div>
+              <button
+                onClick={fetchRandomArticle}
+                    className="group inline-flex items-center gap-3 px-8 py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
+                  >
+                    <Compass 
+                      className="h-5 w-5 transition-transform duration-300 group-hover:rotate-180" 
+                      weight="duotone"
+                    />
+                    <span className="text-lg">Discover Another Story</span>
+                    <span className="inline-block transition-transform duration-300 group-hover:translate-x-1">→</span>
+              </button>
+            </div>
 
             {/* Article Type Key - with more spacing */}
             <div className={`mt-16 flex justify-center ${
