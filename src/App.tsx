@@ -78,6 +78,7 @@ function App(): JSX.Element {
   const { articleTitle } = useParams();
   const isLoadingRef = useRef(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
 
   const stopSpeech = () => {
     window.speechSynthesis.cancel();
@@ -365,70 +366,89 @@ function App(): JSX.Element {
     };
   }, []);
 
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        searchContainerRef.current && 
+        !searchContainerRef.current.contains(event.target as Node) && 
+        isSearchExpanded && 
+        !searchQuery
+      ) {
+        setIsSearchExpanded(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isSearchExpanded, searchQuery]);
+
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-900 dark:to-gray-800 font-sans transition-colors duration-200">
       <header className="bg-white dark:bg-gray-800 shadow-sm transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
-            {/* Logo and brand */}
-            <div className={`flex items-center space-x-3 transition-all duration-300 ${
-              isSearchExpanded ? 'hidden md:flex' : 'flex'
-            }`}>
-              <a 
-                href="/"
-                className="flex items-center space-x-3 hover:opacity-80 transition-opacity"
-                onClick={(e) => {
-                  e.preventDefault();
-                  window.location.reload();
-                }}
+            {/* Logo and search section */}
+            <div className="flex items-center justify-between gap-4 w-full">
+              {/* Logo - hide on mobile when search is expanded */}
+              <div className={`transition-all duration-300 ${
+                isSearchExpanded ? 'hidden md:flex' : 'flex'
+              }`}>
+                <a 
+                  href="/"
+                  className="flex items-center space-x-3 hover:opacity-80 transition-opacity"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    window.location.reload();
+                  }}
+                >
+                  <Book className="h-8 w-8 text-amber-600 dark:text-amber-500" weight="duotone" />
+                  <h1 className="text-2xl font-playfair font-bold text-gray-900 dark:text-white">
+                    Encyclopedian
+                  </h1>
+                </a>
+              </div>
+
+              {/* Search */}
+              <div 
+                ref={searchContainerRef}
+                className={`relative transition-all duration-300 ${
+                  isSearchExpanded ? 'w-full' : 'w-10 md:w-80'
+                }`}
               >
-                <Book className="h-8 w-8 text-amber-600 dark:text-amber-500" weight="duotone" />
-                <h1 className="text-2xl font-playfair font-bold text-gray-900 dark:text-white">
-                  Encyclopedian
-                </h1>
-              </a>
-            </div>
+                {/* Mobile search button */}
+                <button 
+                  className={`md:hidden absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 z-10 ${
+                    isSearchExpanded ? 'hidden' : 'block'
+                  }`}
+                  onClick={() => setIsSearchExpanded(true)}
+                  aria-label="Open search"
+                >
+                  <MagnifyingGlass className="h-5 w-5" weight="duotone" />
+                </button>
 
-            {/* Search and theme controls */}
-            <div className="flex items-center justify-between gap-4">
-              {/* Search with expand/collapse on mobile */}
-              <div className="relative flex-1 md:max-w-md">
-                <div className={`flex items-center transition-all duration-300 ${
-                  isSearchExpanded ? 'w-full' : 'w-10 md:w-full'
+                {/* Search input */}
+                <input
+                  type="text"
+                  placeholder="Search articles..."
+                  value={searchQuery}
+                  onChange={handleSearch}
+                  onBlur={() => !searchQuery && setIsSearchExpanded(false)}
+                  className={`w-full bg-gray-100 dark:bg-gray-800 dark:text-white rounded-lg pl-10 pr-4 py-2 text-sm transition-all duration-300 ${
+                    isSearchExpanded ? 'opacity-100' : 'opacity-0 md:opacity-100'
+                  }`}
+                />
+
+                {/* Search icon */}
+                <div className={`absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 ${
+                  isSearchExpanded ? 'block' : 'hidden md:block'
                 }`}>
-                  {/* Search icon/button for mobile */}
-                  <button 
-                    className="md:hidden absolute left-3 text-gray-400"
-                    onClick={() => setIsSearchExpanded(!isSearchExpanded)}
-                    aria-label="Toggle search"
-                  >
-                    <MagnifyingGlass className="h-5 w-5" weight="duotone" />
-                  </button>
-
-                  {/* Search input */}
-                  <input
-                    type="text"
-                    placeholder="Search articles..."
-                    value={searchQuery}
-                    onChange={handleSearch}
-                    className={`w-full bg-gray-100 dark:bg-gray-800 dark:text-white rounded-lg pl-10 pr-4 py-2 text-sm transition-all duration-300 ${
-                      isSearchExpanded ? 'opacity-100' : 'opacity-0 md:opacity-100'
-                    }`}
-                    style={{ 
-                      width: isSearchExpanded ? '100%' : '40px',
-                      cursor: isSearchExpanded ? 'text' : 'pointer',
-                    }}
-                    onClick={() => !isSearchExpanded && setIsSearchExpanded(true)}
-                  />
-
-                  {/* Desktop search icon */}
-                  <div className="hidden md:block absolute left-3 text-gray-400">
-                    <MagnifyingGlass className="h-5 w-5" weight="duotone" />
-                  </div>
+                  <MagnifyingGlass className="h-5 w-5" weight="duotone" />
                 </div>
               </div>
 
-              {/* Theme toggle - hide on mobile when search is expanded */}
+              {/* Theme toggle */}
               <button
                 onClick={toggleTheme}
                 className={`transition-all duration-300 ${
@@ -515,18 +535,25 @@ function App(): JSX.Element {
               )}
 
               {/* Title and Category Section */}
-              <div className="flex justify-between items-start mb-8 relative">
-                <div className="flex-1 flex items-start space-x-4">
-                  <BookOpen className="h-10 w-10 text-amber-600 dark:text-amber-500 flex-shrink-0" weight="duotone" />
-                  <div className="flex-1 flex items-start justify-between">
-                    <div className="flex-1">
-                      <h3 className="text-4xl font-playfair font-bold text-gray-900 dark:text-white mb-4 leading-tight">{currentArticle.title}</h3>
+              <div className="flex flex-col md:flex-row justify-between items-start mb-8 relative">
+                <div className="flex flex-col md:flex-row md:items-start w-full gap-4">
+                  {/* Icon and Category */}
+                  <div className="flex items-center justify-between w-full md:w-auto mb-4 md:mb-0">
+                    <div className="flex items-center gap-4">
+                      <BookOpen className="h-10 w-10 text-amber-600 dark:text-amber-500 flex-shrink-0" weight="duotone" />
+                      <div className="flex items-center space-x-3">
+                        <span className="px-4 py-1.5 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded-full text-sm font-medium whitespace-nowrap shadow-sm">
+                          {currentArticle.category}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center space-x-3 ml-4 relative">
-                      <span className="px-4 py-1.5 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded-full text-sm font-medium whitespace-nowrap shadow-sm">
-                        {currentArticle.category}
-                      </span>
-                    </div>
+                  </div>
+                  
+                  {/* Title */}
+                  <div className="flex-1">
+                    <h3 className="text-4xl font-playfair font-bold text-gray-900 dark:text-white leading-tight">
+                      {currentArticle.title}
+                    </h3>
                   </div>
                 </div>
               </div>
@@ -552,7 +579,7 @@ function App(): JSX.Element {
               </div>
               
               {isExpanded ? (
-                <div className="flex justify-center mt-4">
+                <div className="flex justify-center mt-4 mb-16 md:mb-4">
                   <p className="text-gray-600 dark:text-gray-300 italic text-center group">
                     <span className="inline-flex items-center gap-2 transition-all duration-300 group-hover:text-amber-400 dark:group-hover:text-amber-500">
                       Click to collapse
@@ -561,7 +588,7 @@ function App(): JSX.Element {
                   </p>
                 </div>
               ) : (
-                <div className="flex flex-col items-center mt-4 transition-opacity duration-500 group">
+                <div className="flex flex-col items-center mt-4 mb-16 md:mb-4 transition-opacity duration-500 group">
                   <Sparkle 
                     className="h-6 w-6 text-amber-400 dark:text-amber-500 mb-4 animate-pulse" 
                     weight="fill" 
