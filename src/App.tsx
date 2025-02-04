@@ -24,6 +24,7 @@ import type {
 import type { ArticleData } from './types';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { initGA, logPageView, logEvent } from './utils/analytics';
+import { NewsletterSignup } from './components/NewsletterSignup';
 
 // Face detection support check
 const isFaceDetectionSupported = async () => {
@@ -134,14 +135,14 @@ function App(): JSX.Element {
         console.warn('Failed to fetch image:', imageResponse.statusText);
         return null;
       }
-
+      
       const imageData = await imageResponse.json();
       console.log('Image data:', imageData);
       
       const imagePages = imageData.query.pages;
       const imagePage = imagePages[Object.keys(imagePages)[0]];
       let mainImagePosition = 'center 25%';
-
+      
       // Get the actual image URL
       const imageUrl = imagePage.thumbnail?.source;
       if (!imageUrl) {
@@ -153,9 +154,9 @@ function App(): JSX.Element {
 
       // Try to get cached position first
       const cachedPosition = imagePositionCache.get(imageUrl);
-      if (cachedPosition) {
-        mainImagePosition = cachedPosition;
-      } else {
+        if (cachedPosition) {
+          mainImagePosition = cachedPosition;
+        } else {
         mainImagePosition = await getFacePosition(imageUrl);
         imagePositionCache.set(imageUrl, mainImagePosition);
       }
@@ -279,8 +280,8 @@ function App(): JSX.Element {
         setError(err.message);
       } else {
         setError('An unknown error occurred');
-      }
-      setIsLoading(false);
+    }
+    setIsLoading(false);
       setShowContent(false);
     } finally {
       isLoadingRef.current = false;
@@ -324,7 +325,7 @@ function App(): JSX.Element {
           setError('Failed to fetch a random article. Please try again.');
         }
         console.error('Error fetching random article:', err);
-        setIsLoading(false);
+    setIsLoading(false);
       }
     }
   };
@@ -334,8 +335,8 @@ function App(): JSX.Element {
     if (isInitialMount.current) {
       isInitialMount.current = false;
       if (!articleTitle) {
-        fetchRandomArticle();
-      }
+      fetchRandomArticle();
+    }
       return;
     }
 
@@ -414,12 +415,12 @@ function App(): JSX.Element {
                     window.location.reload();
                   }}
                 >
-                  <Book className="h-8 w-8 text-amber-600 dark:text-amber-500" weight="duotone" />
+              <Book className="h-8 w-8 text-amber-600 dark:text-amber-500" weight="duotone" />
                   <h1 className="text-2xl font-playfair font-bold text-gray-900 dark:text-white">
                     Encyclopedian
                   </h1>
                 </a>
-              </div>
+            </div>
 
               {/* Search */}
               <div 
@@ -456,7 +457,7 @@ function App(): JSX.Element {
                   isSearchExpanded ? 'block' : 'hidden md:block'
                 }`}>
                   <MagnifyingGlass className="h-5 w-5" weight="duotone" />
-                </div>
+              </div>
               </div>
 
               {/* Theme toggle */}
@@ -478,7 +479,7 @@ function App(): JSX.Element {
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-8 sm:py-12">
+      <main className="flex-1 max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-8">
         <div className="text-center mb-12">
           <h2 className="text-5xl font-playfair font-bold text-gray-900 dark:text-white mb-6">
             Explore stories from history
@@ -640,73 +641,73 @@ function App(): JSX.Element {
           <>
             <div className={`mt-16 grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-8 ${
               showContent ? 'block' : 'hidden'
-            }`}>
-              {currentArticle.relatedArticles
-                .sort((a, b) => {
-                  const typeOrder = { direct: 0, related: 1, broader: 2 };
-                  return typeOrder[a.type as keyof typeof typeOrder] - typeOrder[b.type as keyof typeof typeOrder];
-                })
-                .map((related, index) => (
-                <div
-                  key={index}
+          }`}>
+            {currentArticle.relatedArticles
+              .sort((a, b) => {
+                const typeOrder = { direct: 0, related: 1, broader: 2 };
+                return typeOrder[a.type as keyof typeof typeOrder] - typeOrder[b.type as keyof typeof typeOrder];
+              })
+              .map((related, index) => (
+              <div
+                key={index}
                     className="relative overflow-hidden group opacity-0 animate-fadeIn"
                     style={{ 
                       animationDelay: `${index * 100}ms`,
                       animationFillMode: 'forwards'
                     }}
-                  onClick={() => fetchArticleData(related.title)}
-                  role="button"
-                  tabIndex={0}
-                >
+                onClick={() => fetchArticleData(related.title)}
+                role="button"
+                tabIndex={0}
+              >
                     <div className="relative bg-white dark:bg-gray-800 backdrop-blur-sm rounded-2xl shadow-lg transform transition-transform duration-300 group-hover:-translate-y-1">
-                    <div className="aspect-[3/1.5] w-full overflow-hidden rounded-t-2xl bg-gray-100 dark:bg-gray-700 shadow-sm relative">
-                      {related.image ? (
-                        <img
-                          src={related.image.url}
-                          alt={related.image.caption}
-                         className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                         style={{ objectPosition: related.image.position }}
-                        />
-                      ) : (
-                        <div className="h-full w-full bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-gray-700 flex items-center justify-center relative overflow-hidden group-hover:scale-105 transition-transform duration-300">
-                          <div className="absolute inset-0 bg-gradient-to-br from-transparent to-amber-100/30 dark:from-transparent dark:to-amber-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                          {React.createElement(getCategoryIcon(related.title + ' ' + related.extract), {
-                            className: "h-16 w-16 text-amber-500/50 dark:text-amber-400/50 transform group-hover:scale-110 group-hover:rotate-3 transition-all duration-300",
-                            strokeWidth: 1.5
-                          })}
-                          <div className="absolute inset-0 bg-gradient-to-b from-amber-50/30 dark:from-gray-800/30 to-transparent" />
-                        </div>
-                      )}
-                    </div>
-                    <span className={`absolute top-3 right-3 px-2.5 py-1 text-xs font-medium shadow-sm ${
-                    related.type === 'direct' ? 'bg-emerald-500 text-white' :
-                    related.type === 'related' ? 'bg-purple-500 text-white' :
-                    related.type === 'broader' ? 'bg-blue-500 text-white' :
-                    'bg-indigo-500 text-white'
-                    } rounded-full shadow-md`}>
-                    {related.type === 'direct' ? '✨ Down the Rabbit Hole' :
-                     related.type === 'related' ? '🔄 Plot Twist' :
-                     related.type === 'broader' ? '🌟 Mind Expansion' :
-                     '🌌 Quantum Leap'}
-                    </span>
+                  <div className="aspect-[3/1.5] w-full overflow-hidden rounded-t-2xl bg-gray-100 dark:bg-gray-700 shadow-sm relative">
+                    {related.image ? (
+                      <img
+                        src={related.image.url}
+                        alt={related.image.caption}
+                       className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                       style={{ objectPosition: related.image.position }}
+                      />
+                    ) : (
+                      <div className="h-full w-full bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-gray-700 flex items-center justify-center relative overflow-hidden group-hover:scale-105 transition-transform duration-300">
+                        <div className="absolute inset-0 bg-gradient-to-br from-transparent to-amber-100/30 dark:from-transparent dark:to-amber-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                        {React.createElement(getCategoryIcon(related.title + ' ' + related.extract), {
+                          className: "h-16 w-16 text-amber-500/50 dark:text-amber-400/50 transform group-hover:scale-110 group-hover:rotate-3 transition-all duration-300",
+                          strokeWidth: 1.5
+                        })}
+                        <div className="absolute inset-0 bg-gradient-to-b from-amber-50/30 dark:from-gray-800/30 to-transparent" />
+                      </div>
+                    )}
                   </div>
-                  <div className="p-2 sm:p-4">
-                    <h4 className="font-playfair font-bold text-xl text-gray-900 dark:text-white group-hover:text-amber-500 transition-colors leading-snug mb-2">
-                      {related.title}
-                    </h4>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed">
-                      {related.extract}
-                    </p>
-                  </div>
-                  <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-gray-900/5 dark:ring-white/5 group-hover:ring-amber-500/20 transition-colors"></div>
+                  <span className={`absolute top-3 right-3 px-2.5 py-1 text-xs font-medium shadow-sm ${
+                  related.type === 'direct' ? 'bg-emerald-500 text-white' :
+                  related.type === 'related' ? 'bg-purple-500 text-white' :
+                  related.type === 'broader' ? 'bg-blue-500 text-white' :
+                  'bg-indigo-500 text-white'
+                  } rounded-full shadow-md`}>
+                  {related.type === 'direct' ? '✨ Down the Rabbit Hole' :
+                   related.type === 'related' ? '🔄 Plot Twist' :
+                   related.type === 'broader' ? '🌟 Mind Expansion' :
+                   '🌌 Quantum Leap'}
+                  </span>
                 </div>
-              ))}
-            </div>
+                  <div className="p-2 sm:p-4">
+                  <h4 className="font-playfair font-bold text-xl text-gray-900 dark:text-white group-hover:text-amber-500 transition-colors leading-snug mb-2">
+                    {related.title}
+                  </h4>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed">
+                    {related.extract}
+                  </p>
+                </div>
+                <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-gray-900/5 dark:ring-white/5 group-hover:ring-amber-500/20 transition-colors"></div>
+              </div>
+            ))}
+          </div>
 
             {/* New Article button with animation */}
             <div className="mt-8 text-center">
-              <button
-                onClick={fetchRandomArticle}
+          <button
+            onClick={fetchRandomArticle}
                     className="group inline-flex items-center gap-3 px-8 py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
                   >
                     <Compass 
@@ -715,8 +716,8 @@ function App(): JSX.Element {
                     />
                     <span className="text-lg">Discover Another Story</span>
                     <span className="inline-block transition-transform duration-300 group-hover:translate-x-1">→</span>
-              </button>
-            </div>
+          </button>
+          </div>
 
             {/* Article Type Key - with more spacing */}
             <div className={`mt-16 flex justify-center ${
@@ -755,9 +756,14 @@ function App(): JSX.Element {
                 <p className="text-sm text-gray-600 dark:text-gray-300">
                       Find unexpected discoveries
                 </p>
-                  </div>
-                </div>
               </div>
+            </div>
+          </div>
+            </div>
+
+            {/* Newsletter Signup - moved below key */}
+            <div className="mt-8">
+              <NewsletterSignup />
             </div>
           </>
         )}
